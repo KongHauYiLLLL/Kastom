@@ -1,7 +1,24 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { GenerationResponse } from "../types";
 
-const apiKey = process.env.API_KEY;
+// Helper to robustly find the API key in various build environments (Vite, Webpack, etc.)
+const getApiKey = (): string => {
+  // 1. Check process.env (standard Node/Webpack/configured Vite)
+  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+    return process.env.API_KEY;
+  }
+  // 2. Check import.meta.env (Vite standard)
+  // @ts-ignore - Suppress TS error for non-module environments or missing types
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    // @ts-ignore
+    if (import.meta.env.VITE_API_KEY) return import.meta.env.VITE_API_KEY;
+    // @ts-ignore
+    if (import.meta.env.API_KEY) return import.meta.env.API_KEY;
+  }
+  return '';
+};
+
+const apiKey = getApiKey();
 
 // Initialize GenAI client
 // We create a new instance per call in the component to ensure latest key if needed, 
@@ -30,7 +47,7 @@ Rules:
 
 export const generateWidgetCode = async (prompt: string): Promise<GenerationResponse> => {
   if (!apiKey) {
-    throw new Error("API_KEY is missing from environment variables.");
+    throw new Error("API Key is missing. Please set VITE_API_KEY in your environment variables.");
   }
 
   try {
