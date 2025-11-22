@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Edit2, Trash2, Sparkles, GripHorizontal, Loader2, Copy, Settings, AlertTriangle, Grid, BookOpen, Calculator, Clock } from 'lucide-react';
+import { Plus, Trash2, Sparkles, GripHorizontal, Copy, Settings, AlertTriangle, Grid, BookOpen, Calculator, Clock } from 'lucide-react';
 import { WidgetData, DragMode, DragState, GenerationResponse, WidgetCustomization } from './types';
-import { generateWidgetCode } from './services/geminiService';
 import WidgetRenderer from './components/WidgetRenderer';
 import Modal from './components/Modal';
 import { PREMADE_WIDGETS } from './constants/premadeWidgets';
@@ -12,7 +11,6 @@ import {
   DEFAULT_WIDGET_WIDTH, 
   DEFAULT_WIDGET_HEIGHT,
   LOCAL_STORAGE_KEY,
-  EXAMPLE_PROMPTS,
   DEFAULT_CUSTOMIZATION
 } from './constants';
 
@@ -32,11 +30,7 @@ export default function App() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCustomizationModalOpen, setIsCustomizationModalOpen] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-
-  const [prompt, setPrompt] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
   
-  const [editingWidgetId, setEditingWidgetId] = useState<string | null>(null);
   const [customizingWidgetId, setCustomizingWidgetId] = useState<string | null>(null);
   const [tempCustomization, setTempCustomization] = useState<WidgetCustomization>(DEFAULT_CUSTOMIZATION);
 
@@ -54,7 +48,6 @@ export default function App() {
     initialW: 0,
     initialH: 0,
   });
-  const [error, setError] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -105,14 +98,6 @@ export default function App() {
   // --- Actions ---
 
   const handleOpenCreate = () => {
-    setEditingWidgetId(null);
-    setPrompt('');
-    setIsCreateModalOpen(true);
-  };
-
-  const handleOpenEdit = (widget: WidgetData) => {
-    setEditingWidgetId(widget.id);
-    setPrompt(widget.prompt);
     setIsCreateModalOpen(true);
   };
 
@@ -142,14 +127,13 @@ export default function App() {
     return { x: worldCX, y: worldCY };
   };
 
-  const createWidgetFromData = (data: GenerationResponse, promptText: string) => {
+  const createWidgetFromData = (data: GenerationResponse, titleSuffix: string) => {
     const center = getViewportCenter();
     const offset = widgets.length * 20; 
     
     const newWidget: WidgetData = {
       id: uuidv4(),
       title: data.title || "New Widget",
-      prompt: promptText,
       html: data.html,
       css: data.css,
       js: data.js,
@@ -165,50 +149,12 @@ export default function App() {
 
     setWidgets(prev => [...prev, newWidget]);
     setIsCreateModalOpen(false);
-    setEditingWidgetId(null);
   };
 
   const handleCreatePremade = (key: string) => {
     const template = PREMADE_WIDGETS[key];
     if (template) {
-      createWidgetFromData(template, `Premade: ${template.title}`);
-    }
-  };
-
-  const handleSubmitGeneration = async () => {
-    if (!prompt.trim()) return;
-    setIsGenerating(true);
-    setError(null);
-
-    try {
-      const data: GenerationResponse = await generateWidgetCode(prompt);
-      
-      if (editingWidgetId) {
-        // Update existing widget content
-        setWidgets(prev => prev.map(w => {
-          if (w.id === editingWidgetId) {
-            return {
-              ...w,
-              title: data.title || w.title,
-              prompt: prompt,
-              html: data.html,
-              css: data.css,
-              js: data.js,
-            };
-          }
-          return w;
-        }));
-        setIsCreateModalOpen(false);
-        setEditingWidgetId(null);
-        setPrompt('');
-      } else {
-        createWidgetFromData(data, prompt);
-        setPrompt('');
-      }
-    } catch (err: any) {
-      setError("Failed to generate widget. " + (err.message || "Try again."));
-    } finally {
-      setIsGenerating(false);
+      createWidgetFromData(template, template.title);
     }
   };
 
@@ -428,7 +374,7 @@ export default function App() {
             className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-full font-medium transition-all flex items-center gap-2 shadow-lg shadow-primary/20"
           >
             <Plus size={18} />
-            <span>Create Widget</span>
+            <span>Add Widget</span>
           </button>
         </div>
       </header>
@@ -453,7 +399,7 @@ export default function App() {
                 onClick={handleOpenCreate}
                 className="text-primary hover:text-primary/80 font-semibold text-sm"
               >
-                Create your first widget
+                Add your first widget
               </button>
             </div>
           </div>
@@ -517,17 +463,6 @@ export default function App() {
                     <Settings size={12} />
                   </button>
                   
-                  <button 
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleOpenEdit(widget);
-                    }}
-                    className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-blue-400"
-                    title="Edit Prompt / Regenerate"
-                  >
-                    <Edit2 size={12} />
-                  </button>
                   <button 
                     onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
@@ -695,98 +630,54 @@ export default function App() {
         </div>
       </Modal>
 
-      {/* --- Creation/Generate Modal --- */}
+      {/* --- Add Widget Modal --- */}
       <Modal 
         isOpen={isCreateModalOpen} 
-        onClose={() => !isGenerating && setIsCreateModalOpen(false)} 
-        title={editingWidgetId ? "Edit Widget" : "Create New Widget"}
+        onClose={() => setIsCreateModalOpen(false)} 
+        title="Add Widget"
       >
         <div className="space-y-4">
-          
-          {/* Prompt Section */}
-          <div>
-            <label className="block text-sm font-medium text-zinc-400 mb-1">
-              {editingWidgetId ? "Refine your prompt" : "Describe your widget"}
-            </label>
-            <textarea 
-              className="w-full h-28 bg-black/20 border border-zinc-700 rounded-lg p-3 text-sm text-white placeholder-zinc-600 focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
-              placeholder="e.g., A pomodoro timer with a circular progress bar and nice gradients..."
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              autoFocus
-            />
-          </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                onClick={() => handleCreatePremade('TABLE')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <Grid size={28} className="text-emerald-400" />
+                </div>
+                <span className="text-sm font-semibold">Smart Table</span>
+              </button>
 
-          {/* Templates Section - Only show if creating new */}
-          {!editingWidgetId && (
-            <div className="pt-2 border-t border-zinc-800/50">
-               <p className="text-xs font-medium text-zinc-500 mb-2">Quick Start Templates</p>
-               <div className="grid grid-cols-4 gap-2">
-                 <button onClick={() => handleCreatePremade('TABLE')} className="flex flex-col items-center gap-1 p-2 rounded bg-zinc-800/50 hover:bg-zinc-800 hover:text-primary transition-colors text-zinc-400">
-                    <Grid size={18} />
-                    <span className="text-[10px]">Table</span>
-                 </button>
-                 <button onClick={() => handleCreatePremade('NOTEBOOK')} className="flex flex-col items-center gap-1 p-2 rounded bg-zinc-800/50 hover:bg-zinc-800 hover:text-primary transition-colors text-zinc-400">
-                    <BookOpen size={18} />
-                    <span className="text-[10px]">Notes</span>
-                 </button>
-                 <button onClick={() => handleCreatePremade('CALCULATOR')} className="flex flex-col items-center gap-1 p-2 rounded bg-zinc-800/50 hover:bg-zinc-800 hover:text-primary transition-colors text-zinc-400">
-                    <Calculator size={18} />
-                    <span className="text-[10px]">Calc</span>
-                 </button>
-                 <button onClick={() => handleCreatePremade('CLOCK')} className="flex flex-col items-center gap-1 p-2 rounded bg-zinc-800/50 hover:bg-zinc-800 hover:text-primary transition-colors text-zinc-400">
-                    <Clock size={18} />
-                    <span className="text-[10px]">Clock</span>
-                 </button>
-               </div>
+              <button 
+                onClick={() => handleCreatePremade('NOTEBOOK')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <BookOpen size={28} className="text-amber-400" />
+                </div>
+                <span className="text-sm font-semibold">Notebook</span>
+              </button>
+
+              <button 
+                onClick={() => handleCreatePremade('CALCULATOR')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <Calculator size={28} className="text-blue-400" />
+                </div>
+                <span className="text-sm font-semibold">Calculator</span>
+              </button>
+
+              <button 
+                onClick={() => handleCreatePremade('CLOCK')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <Clock size={28} className="text-purple-400" />
+                </div>
+                <span className="text-sm font-semibold">Time Suite</span>
+              </button>
             </div>
-          )}
-
-          {/* Example Prompts */}
-          <div>
-            <p className="text-xs text-zinc-500 mb-2">Or try a prompt:</p>
-            <div className="flex flex-wrap gap-2">
-              {EXAMPLE_PROMPTS.slice(0,4).map((ex, i) => (
-                <button
-                  key={i}
-                  onClick={() => setPrompt(ex)}
-                  className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-2 py-1 rounded-md transition-colors truncate max-w-[150px]"
-                >
-                  {ex}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {error && (
-            <div className="bg-red-900/20 border border-red-900/50 text-red-200 text-xs p-3 rounded-lg">
-              {error}
-            </div>
-          )}
-
-          <button 
-            onClick={handleSubmitGeneration}
-            disabled={!prompt.trim() || isGenerating}
-            className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all mt-2"
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 size={18} className="animate-spin" />
-                {editingWidgetId ? "Regenerating..." : "Generating Code..."}
-              </>
-            ) : (
-              <>
-                <Sparkles size={18} />
-                {editingWidgetId ? "Regenerate Widget" : "Generate Widget"}
-              </>
-            )}
-          </button>
-          
-          {!process.env.API_KEY && (
-            <p className="text-[10px] text-center text-yellow-500/80 mt-2">
-              Warning: API_KEY not detected. AI generation may fail.
-            </p>
-          )}
         </div>
       </Modal>
 

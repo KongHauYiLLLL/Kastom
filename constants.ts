@@ -10,12 +10,3 @@ export const DEFAULT_CUSTOMIZATION = {
   fontSize: 16,
   borderRadius: 16
 };
-
-export const EXAMPLE_PROMPTS = [
-  "Digital clock with neon glow",
-  "Bitcoin price tracker",
-  "Pomodoro timer",
-  "Weather card with animated icons",
-  "To-do list with checkboxes",
-  "Simple calculator"
-];

@@ -7,7 +7,6 @@ export interface WidgetCustomization {
 export interface WidgetData {
   id: string;
   title: string;
-  prompt: string;
   html: string;
   css: string;
   js: string;
