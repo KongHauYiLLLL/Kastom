@@ -1,0 +1,5 @@
+{
+  "name": "Kastom",
+  "description": "An AI-powered PWA dashboard where users generate custom widgets via prompts.",
+  "requestFramePermissions": []
+}
