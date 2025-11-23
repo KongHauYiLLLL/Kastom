@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Trash2, Sparkles, GripHorizontal, Copy, Settings, AlertTriangle, Grid, BookOpen, Calculator, Clock } from 'lucide-react';
+import { Plus, Trash2, Sparkles, GripHorizontal, Copy, Settings, AlertTriangle, Grid, BookOpen, Calculator, Clock, ListTodo, PenTool, ArrowRightLeft, DollarSign, Hourglass, Hash, Wind } from 'lucide-react';
 import { WidgetData, DragMode, DragState, GenerationResponse, WidgetCustomization } from './types';
 import WidgetRenderer from './components/WidgetRenderer';
 import Modal from './components/Modal';
@@ -22,6 +23,75 @@ const uuidv4 = () => {
   });
 };
 
+// Helper for smart collision-free placement
+const findNextAvailablePosition = (
+  startX: number,
+  startY: number,
+  width: number,
+  height: number,
+  widgets: WidgetData[],
+  gridSize: number = 20
+): { x: number, y: number } => {
+  
+  // Snap start to grid
+  let x = Math.round(startX / gridSize) * gridSize;
+  let y = Math.round(startY / gridSize) * gridSize;
+  
+  const isOverlapping = (cx: number, cy: number) => {
+    return widgets.some(w => {
+      // Strict overlapping check
+      return (
+         cx < w.position.x + w.size.w &&
+         cx + width > w.position.x &&
+         cy < w.position.y + w.size.h &&
+         cy + height > w.position.y
+      );
+    });
+  };
+
+  // If the initial position is free, take it
+  if (!isOverlapping(x, y)) return { x, y };
+
+  // Spiral Search Algorithm
+  let dx = gridSize;
+  let dy = 0;
+  let segmentLength = 1;
+  let segmentPassed = 0;
+  
+  const MAX_STEPS = 5000; 
+
+  for (let i = 0; i < MAX_STEPS; i++) {
+    x += dx;
+    y += dy;
+    segmentPassed++;
+
+    if (!isOverlapping(x, y)) {
+      return { x, y };
+    }
+
+    if (segmentPassed === segmentLength) {
+      segmentPassed = 0;
+      
+      const temp = dx;
+      dx = -dy;
+      dy = temp;
+
+      if (dy === 0) {
+        segmentLength++;
+      }
+    }
+  }
+  
+  return { x: startX + 50, y: startY + 50 };
+};
+
+interface ExtendedDragState extends DragState {
+  currentX: number;
+  currentY: number;
+  currentW: number;
+  currentH: number;
+}
+
 export default function App() {
   // --- State ---
   const [widgets, setWidgets] = useState<WidgetData[]>([]);
@@ -38,7 +108,7 @@ export default function App() {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
-  const [dragState, setDragState] = useState<DragState>({
+  const [dragState, setDragState] = useState<ExtendedDragState>({
     mode: DragMode.NONE,
     widgetId: null,
     startX: 0,
@@ -47,31 +117,74 @@ export default function App() {
     initialY: 0,
     initialW: 0,
     initialH: 0,
+    currentX: 0,
+    currentY: 0,
+    currentW: 0,
+    currentH: 0,
   });
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  // --- Persistence ---
+  // --- Persistence & Welcome Logic ---
   useEffect(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Migration: Ensure all widgets have customization property
-        const migrated = parsed.map((w: any) => ({
-          ...w,
-          customization: w.customization || { ...DEFAULT_CUSTOMIZATION }
-        }));
-        setWidgets(migrated);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const migrated = parsed.map((w: any) => ({
+            ...w,
+            customization: w.customization || { ...DEFAULT_CUSTOMIZATION }
+          }));
+          setWidgets(migrated);
+        } else {
+           spawnWelcomeWidget();
+        }
       } catch (e) {
         console.error("Failed to load widgets", e);
+        spawnWelcomeWidget();
       }
+    } else {
+      spawnWelcomeWidget();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(widgets));
+    if (widgets.length > 0 || localStorage.getItem(LOCAL_STORAGE_KEY)) {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(widgets));
+    }
   }, [widgets]);
+
+  const spawnWelcomeWidget = () => {
+    const template = PREMADE_WIDGETS['NOTEBOOK'];
+    const id = uuidv4();
+    const centerX = (window.innerWidth / 2) - (DEFAULT_WIDGET_WIDTH / 2);
+    const centerY = (window.innerHeight / 2) - (DEFAULT_WIDGET_HEIGHT / 2);
+    
+    // Snap to grid
+    const x = Math.round(centerX / GRID_SIZE) * GRID_SIZE;
+    const y = Math.round(centerY / GRID_SIZE) * GRID_SIZE;
+
+    const welcomeData = {
+      text: "Welcome to Kastom!\n\n• Drag widgets to move them.\n• Use the handle to resize.\n• Click the + button to add more.\n• Customize colors and styles.\n\nEnjoy organizing your space!"
+    };
+
+    const widget: WidgetData = {
+      id,
+      title: "Welcome Note",
+      html: template.html,
+      css: template.css,
+      js: template.js,
+      data: welcomeData,
+      position: { x, y },
+      size: { w: DEFAULT_WIDGET_WIDTH, h: DEFAULT_WIDGET_HEIGHT },
+      zIndex: 1,
+      createdAt: Date.now(),
+      customization: { ...DEFAULT_CUSTOMIZATION, backgroundColor: '#fefce8' }
+    };
+    setWidgets([widget]);
+  };
 
   // --- Widget Internal State persistence listener ---
   useEffect(() => {
@@ -81,7 +194,6 @@ export default function App() {
         
         setWidgets(prevWidgets => prevWidgets.map(w => {
           if (w.id === id) {
-             // Only update if data actually changed to avoid loops, although React state setters handle this well
              if (JSON.stringify(w.data) !== JSON.stringify(data)) {
                return { ...w, data };
              }
@@ -129,7 +241,18 @@ export default function App() {
 
   const createWidgetFromData = (data: GenerationResponse, titleSuffix: string) => {
     const center = getViewportCenter();
-    const offset = widgets.length * 20; 
+    
+    const startX = center.x - (DEFAULT_WIDGET_WIDTH / 2);
+    const startY = center.y - (DEFAULT_WIDGET_HEIGHT / 2);
+    
+    const position = findNextAvailablePosition(
+      startX, 
+      startY, 
+      DEFAULT_WIDGET_WIDTH, 
+      DEFAULT_WIDGET_HEIGHT, 
+      widgets,
+      GRID_SIZE
+    );
     
     const newWidget: WidgetData = {
       id: uuidv4(),
@@ -137,10 +260,7 @@ export default function App() {
       html: data.html,
       css: data.css,
       js: data.js,
-      position: { 
-        x: center.x - (DEFAULT_WIDGET_WIDTH / 2) + (offset % 100), 
-        y: center.y - (DEFAULT_WIDGET_HEIGHT / 2) + (offset % 100) 
-      },
+      position: position,
       size: { w: DEFAULT_WIDGET_WIDTH, h: DEFAULT_WIDGET_HEIGHT },
       zIndex: widgets.length + 1,
       createdAt: Date.now(),
@@ -162,17 +282,22 @@ export default function App() {
     const widget = widgets.find(w => w.id === id);
     if (!widget) return;
 
+    const position = findNextAvailablePosition(
+      widget.position.x + 20,
+      widget.position.y + 20,
+      widget.size.w,
+      widget.size.h,
+      widgets,
+      GRID_SIZE
+    );
+
     const newWidget: WidgetData = {
       ...widget,
       id: uuidv4(),
       title: `${widget.title} (Copy)`,
-      position: { 
-        x: widget.position.x + 40, 
-        y: widget.position.y + 40 
-      },
+      position: position,
       zIndex: widgets.length + 1,
       createdAt: Date.now(),
-      // Important: Deep copy data if it exists to avoid reference sharing
       data: widget.data ? JSON.parse(JSON.stringify(widget.data)) : undefined
     };
 
@@ -201,18 +326,14 @@ export default function App() {
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) return; // Let browser handle pinch-zoom if configured
+      if (e.ctrlKey) return; 
       e.preventDefault();
 
-      // Down (positive) = Zoom Out
-      // Up (negative) = Zoom In
       const ZOOM_SENSITIVITY = 0.001;
       const delta = -e.deltaY * ZOOM_SENSITIVITY;
       
-      // Clamp zoom level
       const newZoom = Math.min(Math.max(zoom * Math.exp(delta), 0.1), 5);
       
-      // Calculate mouse position in world coordinates before zoom
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
 
@@ -222,7 +343,6 @@ export default function App() {
       const worldX = (mouseX - pan.x) / zoom;
       const worldY = (mouseY - pan.y) / zoom;
 
-      // Adjust pan to keep the world point under mouse stationary
       const newPanX = mouseX - worldX * newZoom;
       const newPanY = mouseY - worldY * newZoom;
 
@@ -259,11 +379,14 @@ export default function App() {
       initialY: widget.position.y,
       initialW: widget.size.w,
       initialH: widget.size.h,
+      currentX: widget.position.x,
+      currentY: widget.position.y,
+      currentW: widget.size.w,
+      currentH: widget.size.h,
     });
   };
 
   const handleBackgroundMouseDown = (e: React.MouseEvent) => {
-    // Left click only
     if (e.button !== 0) return;
 
     setDragState({
@@ -275,6 +398,10 @@ export default function App() {
       initialY: pan.y,
       initialW: 0,
       initialH: 0,
+      currentX: 0,
+      currentY: 0,
+      currentW: 0,
+      currentH: 0
     });
   };
 
@@ -284,7 +411,6 @@ export default function App() {
     const dx = e.clientX - dragState.startX;
     const dy = e.clientY - dragState.startY;
 
-    // --- Panning ---
     if (dragState.mode === DragMode.PAN) {
       setPan({
         x: dragState.initialX + dx,
@@ -293,45 +419,53 @@ export default function App() {
       return;
     }
 
-    // --- Widget Manipulation ---
     if (!dragState.widgetId) return;
 
-    // Adjust delta by zoom level to ensure 1:1 tracking
     const scaledDx = dx / zoom;
     const scaledDy = dy / zoom;
 
-    setWidgets(prev => prev.map(w => {
-      if (w.id !== dragState.widgetId) return w;
-
-      if (dragState.mode === DragMode.DRAG) {
-        let newX = dragState.initialX + scaledDx;
-        let newY = dragState.initialY + scaledDy;
-
-        // Snap to grid
-        newX = Math.round(newX / GRID_SIZE) * GRID_SIZE;
-        newY = Math.round(newY / GRID_SIZE) * GRID_SIZE;
-
-        return { ...w, position: { x: newX, y: newY } };
-      } 
-      else if (dragState.mode === DragMode.RESIZE) {
-        let newW = dragState.initialW + scaledDx;
-        let newH = dragState.initialH + scaledDy;
-
-        // Snap to grid and enforce min dimensions
-        newW = Math.max(MIN_WIDGET_WIDTH, Math.round(newW / GRID_SIZE) * GRID_SIZE);
-        newH = Math.max(MIN_WIDGET_HEIGHT, Math.round(newH / GRID_SIZE) * GRID_SIZE);
-
-        return { ...w, size: { w: newW, h: newH } };
-      }
-      return w;
-    }));
-  }, [dragState, zoom]);
+    if (dragState.mode === DragMode.DRAG) {
+       const newX = dragState.initialX + scaledDx;
+       const newY = dragState.initialY + scaledDy;
+       setDragState(prev => ({ ...prev, currentX: newX, currentY: newY }));
+    } 
+    else if (dragState.mode === DragMode.RESIZE) {
+       const newW = Math.max(MIN_WIDGET_WIDTH, dragState.initialW + scaledDx);
+       const newH = Math.max(MIN_WIDGET_HEIGHT, dragState.initialH + scaledDy);
+       setDragState(prev => ({ ...prev, currentW: newW, currentH: newH }));
+    }
+  }, [dragState.mode, dragState.initialX, dragState.initialY, dragState.initialW, dragState.initialH, dragState.widgetId, dragState.startX, dragState.startY, zoom]);
 
   const onMouseUp = useCallback(() => {
-    if (dragState.mode !== DragMode.NONE) {
-      setDragState(prev => ({ ...prev, mode: DragMode.NONE, widgetId: null }));
+    if (dragState.mode !== DragMode.NONE && dragState.widgetId) {
+       // Commit changes to widget state
+       setWidgets(prev => prev.map(w => {
+         if (w.id !== dragState.widgetId) return w;
+         
+         if (dragState.mode === DragMode.DRAG) {
+           // Snap to grid
+           const snappedX = Math.round(dragState.currentX / GRID_SIZE) * GRID_SIZE;
+           const snappedY = Math.round(dragState.currentY / GRID_SIZE) * GRID_SIZE;
+           return { ...w, position: { x: snappedX, y: snappedY } };
+         }
+         
+         if (dragState.mode === DragMode.RESIZE) {
+           const snappedW = Math.round(dragState.currentW / GRID_SIZE) * GRID_SIZE;
+           const snappedH = Math.round(dragState.currentH / GRID_SIZE) * GRID_SIZE;
+           return { ...w, size: { w: snappedW, h: snappedH } };
+         }
+         return w;
+       }));
     }
-  }, [dragState.mode]);
+
+    setDragState({
+      mode: DragMode.NONE,
+      widgetId: null,
+      startX: 0, startY: 0,
+      initialX: 0, initialY: 0, initialW: 0, initialH: 0,
+      currentX: 0, currentY: 0, currentW: 0, currentH: 0
+    });
+  }, [dragState]);
 
   useEffect(() => {
     if (dragState.mode !== DragMode.NONE) {
@@ -344,7 +478,6 @@ export default function App() {
     };
   }, [dragState.mode, onMouseMove, onMouseUp]);
 
-  // Determine cursor style
   const getCursorStyle = () => {
     if (dragState.mode === DragMode.PAN) return 'cursor-grabbing';
     if (dragState.mode === DragMode.DRAG) return 'cursor-move';
@@ -385,26 +518,6 @@ export default function App() {
         className={`flex-1 relative overflow-hidden bg-zinc-950 ${getCursorStyle()}`}
         onMouseDown={handleBackgroundMouseDown}
       >
-        {/* Empty State - Centered in Viewport (Overlay) */}
-        {widgets.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50">
-            <div className="bg-zinc-900/80 p-8 rounded-2xl border border-zinc-800 text-center max-w-md backdrop-blur-md shadow-xl pointer-events-auto transform transition-transform hover:scale-105">
-              <Sparkles className="w-12 h-12 mx-auto mb-4 text-primary" />
-              <h3 className="text-xl font-semibold text-zinc-200 mb-2">Infinite Canvas</h3>
-              <p className="mb-6 text-zinc-400">
-                Your dashboard is a boundless creative space.<br/>
-                Scroll to zoom, drag to pan.
-              </p>
-              <button 
-                onClick={handleOpenCreate}
-                className="text-primary hover:text-primary/80 font-semibold text-sm"
-              >
-                Add your first widget
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* World Container */}
         <div 
           className="origin-top-left absolute top-0 left-0 will-change-transform"
@@ -412,7 +525,7 @@ export default function App() {
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           }}
         >
-          {/* Infinite Grid Background - Huge area centered on 0,0 */}
+          {/* Infinite Grid Background */}
           <div 
             className="grid-background absolute pointer-events-none"
             style={{
@@ -425,91 +538,134 @@ export default function App() {
           />
 
           {/* Widgets */}
-          {widgets.map(widget => (
-            <div
-              key={widget.id}
-              className="absolute flex flex-col border border-zinc-800 bg-zinc-900 shadow-xl group"
-              style={{
-                transform: `translate(${widget.position.x}px, ${widget.position.y}px)`,
-                width: widget.size.w,
-                height: widget.size.h,
-                zIndex: widget.zIndex,
-                borderRadius: `${widget.customization?.borderRadius ?? 16}px`,
-                // Disable transitions during drag for instant feedback
-                transition: dragState.widgetId === widget.id ? 'none' : 'box-shadow 0.2s',
-              }}
-              onMouseDown={(e) => onWidgetMouseDown(e, widget.id, DragMode.DRAG)}
-            >
-              {/* Widget Header / Handle */}
-              <div 
-                className="h-9 bg-zinc-800/30 border-b border-zinc-800/50 flex items-center justify-between px-3 cursor-move select-none group-hover:bg-zinc-800/80 transition-colors rounded-t-[inherit]"
-              >
-                <div className="flex items-center gap-2 overflow-hidden">
-                  <GripHorizontal size={14} className="text-zinc-600" />
-                  <span className="text-xs font-medium text-zinc-400 truncate max-w-[120px]" title={widget.title}>
-                    {widget.title}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                   <button 
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleOpenCustomization(widget);
-                    }}
-                    className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-yellow-400"
-                    title="Customize Appearance"
-                  >
-                    <Settings size={12} />
-                  </button>
-                  
-                  <button 
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDuplicate(widget.id);
-                    }}
-                    className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-green-400"
-                    title="Duplicate"
-                  >
-                    <Copy size={12} />
-                  </button>
-                  <button 
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteClick(widget.id);
-                    }}
-                    className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-red-400"
-                    title="Delete"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </div>
+          {widgets.map(widget => {
+            const isDragging = dragState.mode === DragMode.DRAG && dragState.widgetId === widget.id;
+            const isResizing = dragState.mode === DragMode.RESIZE && dragState.widgetId === widget.id;
+            
+            // Determine Display Metrics
+            let x = widget.position.x;
+            let y = widget.position.y;
+            let w = widget.size.w;
+            let h = widget.size.h;
+            
+            if (isDragging) {
+              x = dragState.currentX;
+              y = dragState.currentY;
+            } else if (isResizing) {
+              w = dragState.currentW;
+              h = dragState.currentH;
+            }
+            
+            // Ghost Snap Coordinates
+            const snappedX = Math.round(x / GRID_SIZE) * GRID_SIZE;
+            const snappedY = Math.round(y / GRID_SIZE) * GRID_SIZE;
+            const snappedW = Math.round(w / GRID_SIZE) * GRID_SIZE;
+            const snappedH = Math.round(h / GRID_SIZE) * GRID_SIZE;
 
-              {/* Widget Content */}
-              <div className="flex-1 relative overflow-hidden rounded-b-[inherit]">
-                <WidgetRenderer 
-                  widget={widget} 
-                  isInteracting={dragState.widgetId === widget.id} 
-                />
-                
-                {/* Overlay to block interaction while dragging */}
-                {dragState.widgetId === widget.id && (
-                  <div className="absolute inset-0 bg-transparent z-50" />
+            return (
+              <React.Fragment key={widget.id}>
+                {/* Ghost Outline (Only during interaction) */}
+                {(isDragging || isResizing) && (
+                  <div 
+                    className="absolute border-2 border-dashed border-zinc-600/50 bg-zinc-800/20 rounded-[inherit] z-0 pointer-events-none transition-all duration-75"
+                    style={{
+                      transform: `translate(${isDragging ? snappedX : x}px, ${isDragging ? snappedY : y}px)`,
+                      width: isResizing ? snappedW : w,
+                      height: isResizing ? snappedH : h,
+                      borderRadius: `${widget.customization?.borderRadius ?? 16}px`
+                    }}
+                  />
                 )}
-              </div>
 
-              {/* Resize Handle */}
-              <div 
-                className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize flex items-center justify-center z-20 hover:bg-zinc-700/50 rounded-br-[inherit]"
-                onMouseDown={(e) => onWidgetMouseDown(e, widget.id, DragMode.RESIZE)}
-              >
-                <div className="w-2 h-2 border-r-2 border-b-2 border-zinc-500" />
-              </div>
-            </div>
-          ))}
+                {/* Widget Card */}
+                <div
+                  className={`
+                    absolute flex flex-col border bg-zinc-900 group animate-scale-in
+                    ${isDragging ? 'ring-2 ring-primary border-primary shadow-2xl z-50 cursor-move' : 'border-zinc-700/50 hover:border-zinc-600 shadow-xl z-10'}
+                  `}
+                  style={{
+                    transform: `translate(${x}px, ${y}px)`,
+                    width: w,
+                    height: h,
+                    zIndex: isDragging ? 999 : widget.zIndex,
+                    borderRadius: `${widget.customization?.borderRadius ?? 16}px`,
+                    // Only transition transform when NOT dragging for smooth external updates, but instant drag
+                    transition: isDragging || isResizing ? 'none' : 'transform 0.2s cubic-bezier(0.2, 0, 0.2, 1), width 0.2s, height 0.2s, box-shadow 0.2s',
+                  }}
+                  onMouseDown={(e) => onWidgetMouseDown(e, widget.id, DragMode.DRAG)}
+                >
+                  {/* Widget Header */}
+                  <div 
+                    className="h-9 bg-zinc-800/30 border-b border-zinc-800/50 flex items-center justify-between px-3 cursor-move select-none group-hover:bg-zinc-800/80 transition-colors rounded-t-[inherit]"
+                  >
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <GripHorizontal size={14} className="text-zinc-600 group-hover:text-zinc-400 transition-colors" />
+                      <span className="text-xs font-medium text-zinc-400 truncate max-w-[120px]" title={widget.title}>
+                        {widget.title}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenCustomization(widget);
+                        }}
+                        className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-yellow-400"
+                        title="Customize Appearance"
+                      >
+                        <Settings size={12} />
+                      </button>
+                      
+                      <button 
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDuplicate(widget.id);
+                        }}
+                        className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-green-400"
+                        title="Duplicate"
+                      >
+                        <Copy size={12} />
+                      </button>
+                      <button 
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteClick(widget.id);
+                        }}
+                        className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-red-400"
+                        title="Delete"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Widget Content */}
+                  <div className="flex-1 relative overflow-hidden rounded-b-[inherit]">
+                    <WidgetRenderer 
+                      widget={widget} 
+                      isInteracting={isDragging || isResizing} 
+                    />
+                    
+                    {/* Overlay to block interaction while dragging */}
+                    {(isDragging || isResizing) && (
+                      <div className="absolute inset-0 bg-transparent z-50" />
+                    )}
+                  </div>
+
+                  {/* Resize Handle */}
+                  <div 
+                    className="absolute bottom-0 right-0 w-6 h-6 cursor-nwse-resize flex items-center justify-center z-20 hover:bg-zinc-700/50 rounded-br-[inherit] opacity-0 group-hover:opacity-100 transition-opacity"
+                    onMouseDown={(e) => onWidgetMouseDown(e, widget.id, DragMode.RESIZE)}
+                  >
+                    <div className="w-2 h-2 border-r-2 border-b-2 border-zinc-500" />
+                  </div>
+                </div>
+              </React.Fragment>
+            );
+          })}
         </div>
       </div>
 
@@ -637,7 +793,7 @@ export default function App() {
         title="Add Widget"
       >
         <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <button 
                 onClick={() => handleCreatePremade('TABLE')} 
                 className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
@@ -677,6 +833,77 @@ export default function App() {
                 </div>
                 <span className="text-sm font-semibold">Time Suite</span>
               </button>
+
+              <button 
+                onClick={() => handleCreatePremade('KANBAN')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <ListTodo size={28} className="text-pink-400" />
+                </div>
+                <span className="text-sm font-semibold">Task Board</span>
+              </button>
+
+              <button 
+                onClick={() => handleCreatePremade('SKETCHPAD')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <PenTool size={28} className="text-orange-400" />
+                </div>
+                <span className="text-sm font-semibold">Sketchpad</span>
+              </button>
+
+              <button 
+                onClick={() => handleCreatePremade('CONVERTER')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <ArrowRightLeft size={28} className="text-cyan-400" />
+                </div>
+                <span className="text-sm font-semibold">Converter</span>
+              </button>
+
+              <button 
+                onClick={() => handleCreatePremade('EXPENSE')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <DollarSign size={28} className="text-lime-400" />
+                </div>
+                <span className="text-sm font-semibold">Expenses</span>
+              </button>
+
+              <button 
+                onClick={() => handleCreatePremade('POMODORO')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <Hourglass size={28} className="text-rose-400" />
+                </div>
+                <span className="text-sm font-semibold">Pomodoro</span>
+              </button>
+
+              <button 
+                onClick={() => handleCreatePremade('TALLY')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <Hash size={28} className="text-violet-400" />
+                </div>
+                <span className="text-sm font-semibold">Counter</span>
+              </button>
+
+              <button 
+                onClick={() => handleCreatePremade('BREATHE')} 
+                className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl bg-zinc-800/50 hover:bg-zinc-800 hover:ring-2 ring-primary/50 transition-all text-zinc-300 hover:text-white group"
+              >
+                <div className="bg-zinc-900 p-3 rounded-full group-hover:scale-110 transition-transform">
+                  <Wind size={28} className="text-sky-300" />
+                </div>
+                <span className="text-sm font-semibold">Breathe</span>
+              </button>
+
             </div>
         </div>
       </Modal>
